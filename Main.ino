@@ -104,6 +104,7 @@ TFT_eSprite DischargeIcon = TFT_eSprite(&tft);
 TFT_eSprite ChargeIcon = TFT_eSprite(&tft);
 TFT_eSprite RTEIcon = TFT_eSprite(&tft);
 TFT_eSprite CycleIcon = TFT_eSprite(&tft);
+TFT_eSprite UpdateIcon = TFT_eSprite(&tft);
 
 TFT_eSprite eraseIcon = TFT_eSprite(&tft);
 TFT_eSprite energyIcon = TFT_eSprite(&tft);
@@ -165,6 +166,7 @@ WebServer server(80);
 #include "switchon.h"
 #include "switchoff.h"
 #include "advance.h"
+#include "update.h"
 
 //ota
 #include "serverIndex.h"
@@ -368,8 +370,11 @@ JsonObject Voltage = doc.createNestedObject("Voltage");
 //GITHUB UPDATE
 
 String FirmwareVer = {
-  "2.7"
+  "2.8"
 };
+
+
+bool UpdateAvailable = false;
 
 
 #define URL_fw_Version "https://raw.githubusercontent.com/Emcukcan/FirmwareVersioner/master/bin_version.txt"
@@ -594,8 +599,6 @@ void FIREBASE_CODE( void * pvParameters ) {
       sendDataPrevMillis = millis();
       esp_task_wdt_init(60, false);
 
-
-
       String FirebaseTimeStamp = "/Monitoring/Version1/" + SerialNumber + "/TimeStamp";
       String FirebaseDateStamp = "/Monitoring/Version1/" + SerialNumber + "/DateStamp";
       String FirebaseCoordinates = "/Monitoring/Version1/" + SerialNumber + "/Coordinates";
@@ -608,7 +611,7 @@ void FIREBASE_CODE( void * pvParameters ) {
       String FirebaseMinCell = "/Monitoring/Version1/" + SerialNumber + "/MinCell";
       String FirebaseChargeEnergy = "/Monitoring/Version1/" + SerialNumber + "/ChargeEnergy";
       String FirebaseDischargeEnergy = "/Monitoring/Version1/" + SerialNumber + "/DischargeEnergy";
-
+      String FirebaseRestartCounter = "/Monitoring/Version1/" + SerialNumber + "/RestartCounter";
 
 
       Serial.printf("Set int... %s\n", Firebase.setString(fbdo, F(FirebaseTimeStamp.c_str()), TimeString) ? "ok" : fbdo.errorReason().c_str());
@@ -625,7 +628,7 @@ void FIREBASE_CODE( void * pvParameters ) {
 
       Serial.printf("Set int... %s\n", Firebase.setString(fbdo, F(FirebaseChargeEnergy.c_str()), String(ChargeEnergy)) ? "ok" : fbdo.errorReason().c_str());
       Serial.printf("Set int... %s\n", Firebase.setString(fbdo, F(FirebaseDischargeEnergy.c_str()), String(DischargeEnergy)) ? "ok" : fbdo.errorReason().c_str());
-
+      Serial.printf("Set int... %s\n", Firebase.setString(fbdo, F(FirebaseRestartCounter.c_str()), String(restartCounter)) ? "ok" : fbdo.errorReason().c_str());
 
 
 
@@ -684,11 +687,11 @@ void loop() {
     switch (PageNumber) {
       case 0:
         drawMainMenu();
-        drawBanner(TimeString, DateString, "Main Menu", wifistatus, alarmNo);
+        drawBanner(TimeString, DateString, "Main Menu", wifistatus, alarmNo, UpdateAvailable);
         break;
 
       case 1:
-        drawBanner(TimeString, DateString, "Dashboard", wifistatus, alarmNo);
+        drawBanner(TimeString, DateString, "Dashboard", wifistatus, alarmNo, UpdateAvailable);
 
         drawDashboard(BMS.SOC * 0.1, BMS_equ.max_cell_volt_equ * 0.001, BMS_equ.min_cell_volt_equ * 0.001,
                       BMS_equ.max_cell_volt_equ * 0.001 - BMS_equ.min_cell_volt_equ * 0.001, BMS.sum_voltage * 0.1,
@@ -697,20 +700,20 @@ void loop() {
 
       case 2:
         drawOptimizerGraph (GraphFrame, VoltageArray, "Graph", BMS.sum_voltage * 0.1);
-        drawBanner(TimeString, DateString, "Graphs", wifistatus, alarmNo);
+        drawBanner(TimeString, DateString, "Graphs", wifistatus, alarmNo, UpdateAvailable);
         drawGraphTab(true, false, false);
 
         break;
       case 3:
         drawOptimizerGraph (GraphFrame, CurrentArray, "Graphs", (BMS.current - 30000) * 0.1);
-        drawBanner(TimeString, DateString, "Graphs", wifistatus, alarmNo);
+        drawBanner(TimeString, DateString, "Graphs", wifistatus, alarmNo, UpdateAvailable);
         drawGraphTab(false, true, false);
 
         break;
 
       case 4:
         drawOptimizerGraph (GraphFrame, TempArray, "Graphs", BMS.max_cell_temp - 40);
-        drawBanner(TimeString, DateString, "Graphs", wifistatus, alarmNo);
+        drawBanner(TimeString, DateString, "Graphs", wifistatus, alarmNo, UpdateAvailable);
         //drawBarGraph(GraphFrame, dailyCells, TOLGA_RED, "Cell Values") ;
         //drawBarGraph(BarGraph, dailyGenerator, TOLGA_GREEN, "Daily Generator Energy (kWh)");
 
@@ -720,62 +723,62 @@ void loop() {
 
       case 5:
 
-        drawBanner(TimeString, DateString, "Cell Volts", wifistatus, alarmNo);
+        drawBanner(TimeString, DateString, "Cell Volts", wifistatus, alarmNo, UpdateAvailable);
         drawCell();
 
         break;
 
       case 6:
-        drawBanner(TimeString, DateString, "Alarms", wifistatus, alarmNo); //Current alarms
+        drawBanner(TimeString, DateString, "Alarms", wifistatus, alarmNo, UpdateAvailable); //Current alarms
         drawAlarmFrame(numpadEnable, true, false, false, false, 6, notificationEnable, notificationStatus);
         break;
 
       case 7:
-        drawBanner(TimeString, DateString, "Alarms", wifistatus, alarmNo); //Cell alarms
+        drawBanner(TimeString, DateString, "Alarms", wifistatus, alarmNo, UpdateAvailable); //Cell alarms
         drawAlarmFrame(numpadEnable, false, true, false, false, 7, notificationEnable, notificationStatus);
         break;
 
       case 8:
-        drawBanner(TimeString, DateString, "Alarms", wifistatus, alarmNo); //Rates alarms
+        drawBanner(TimeString, DateString, "Alarms", wifistatus, alarmNo, UpdateAvailable); //Rates alarms
         drawAlarmFrame(numpadEnable, false, false, true, false, 8, notificationEnable, notificationStatus);
         break;
 
       case 9:
-        drawBanner(TimeString, DateString, "Alarms", wifistatus, alarmNo); //Balance alarms
+        drawBanner(TimeString, DateString, "Alarms", wifistatus, alarmNo, UpdateAvailable); //Balance alarms
         drawAlarmFrame(numpadEnable, false, false, false, true, 9, notificationEnable, notificationStatus);
         break;
 
 
 
       case 10:
-        drawBanner(TimeString, DateString, "Energy", wifistatus, alarmNo); //Balance alarms
+        drawBanner(TimeString, DateString, "Energy", wifistatus, alarmNo, UpdateAvailable); //Balance alarms
         drawEnergies(ChargeEnergy, DischargeEnergy, confirmation);
         break;
 
       case 11:
-        drawBanner(TimeString, DateString, "Alarm List", wifistatus, alarmNo); //Balance alarms
+        drawBanner(TimeString, DateString, "Alarm List", wifistatus, alarmNo, UpdateAvailable); //Balance alarms
         drawAlarmsList();
         break;
 
       case 12:
-        drawBanner(TimeString, DateString, "Calibration", wifistatus, alarmNo); //Balance alarms
+        drawBanner(TimeString, DateString, "Calibration", wifistatus, alarmNo, UpdateAvailable); //Balance alarms
         drawSOCCalibrate(numpadEnable, notificationEnable);
         break;
 
       case 13:
-        drawBanner(TimeString, DateString, "Mosfets", wifistatus, alarmNo); //Balance alarms
+        drawBanner(TimeString, DateString, "Mosfets", wifistatus, alarmNo, UpdateAvailable); //Balance alarms
         drawMosfets(notificationEnable, notificationStatus);
         break;
 
 
       case 14:
-        drawBanner(TimeString, DateString, "Info", wifistatus, alarmNo); //Balance alarms
+        drawBanner(TimeString, DateString, "Info", wifistatus, alarmNo, UpdateAvailable); //Balance alarms
         drawInfo();
         break;
 
       case 15:
         ledcWrite(ledChannel, 255);
-        drawBanner(TimeString, DateString, "Update", wifistatus, alarmNo); //Balance alarms
+        drawBanner(TimeString, DateString, "Update", wifistatus, alarmNo, UpdateAvailable); //Balance alarms
         drawUpload();
         break;
 
@@ -783,7 +786,7 @@ void loop() {
 
 
       default:
-        drawBanner(TimeString, DateString, "Dashboard", wifistatus, alarmNo);
+        drawBanner(TimeString, DateString, "Dashboard", wifistatus, alarmNo, UpdateAvailable);
         drawDashboard(BMS.SOC * 0.1, BMS_equ.max_cell_volt_equ * 0.001, BMS.min_cell_volt * 0.001,
                       BMS.max_cell_volt * 0.001 - BMS.min_cell_volt * 0.001, BMS.sum_voltage * 0.1,
                       (BMS.current - 30000) * 0.1, BMS.cell_temperature[0] - 40);
@@ -1132,10 +1135,10 @@ void UDP_CODE( void * pvParameters ) {
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
   printLocalTime();
 
-
-
   if (FirmwareVersionCheck()) {
-    firmwareUpdate();
+    //firmwareUpdate();
+    UpdateAvailable = true;
+    Serial.println("Update Available");
   }
 
   GetPublicIP();
@@ -2079,7 +2082,7 @@ void drawCell() {
 }
 
 
-void drawBanner(String Time, String Date, String Page, bool wifistatus, int notification_no) {
+void drawBanner(String Time, String Date, String Page, bool wifistatus, int notification_no, bool UpdateAvailable) {
 
   Banner.createSprite(480, 95);
   Banner.setTextColor(TFT_WHITE);
@@ -2101,11 +2104,14 @@ void drawBanner(String Time, String Date, String Page, bool wifistatus, int noti
   Banner.drawString(Page, 240, 90);
   Banner.setTextDatum(TL_DATUM);
 
-  //FirmwareVersion
+  //FirmwareVersion+RESTART+SERIAL
   Banner.setTextFont(GLCD);
   Banner.drawString("Ver:" + FirmwareVer, 430, 5);
   Banner.drawString("R:" + String(restartCounter), 430, 18);
+  Banner.drawString("SR:" + SerialNumber, 430, 32);
   Banner.setFreeFont(&Orbitron_Light_32);
+
+
 
   //Banner.setFreeFont(&Orbitron_Light_24);
   Banner.drawString(String(notification_no), 460, 68, 2);
@@ -2121,6 +2127,15 @@ void drawBanner(String Time, String Date, String Page, bool wifistatus, int noti
   else
     wifiIcon.pushImage(0, 0, 16, 16, nowifi);
   wifiIcon.pushToSprite(&Banner, 410, 66, TFT_BLACK);
+
+
+  if (UpdateAvailable) {
+    UpdateIcon.createSprite(16, 16);
+    UpdateIcon.setSwapBytes(true);
+    UpdateIcon.pushImage(0, 0, 16, 16, updateReady);
+    UpdateIcon.pushToSprite(&Banner, 390, 66, TFT_BLACK);
+  }
+
   Banner.pushSprite(0, 0);
   Banner.deleteSprite();
 }
