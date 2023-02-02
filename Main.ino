@@ -49,6 +49,7 @@ unsigned long count = 0;
 #include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
 #include <AsyncJson.h>
+#include "AsyncUDP.h"
 
 char VALUE [512] = {'\0'};  // 511 chars and the end terminator if needed make larger/smaller
 String Output;  //Read output
@@ -370,11 +371,13 @@ JsonObject Voltage = doc.createNestedObject("Voltage");
 //GITHUB UPDATE
 
 String FirmwareVer = {
-  "2.8"
+  "2.9"
 };
 
 
 bool UpdateAvailable = false;
+bool IPReady = true;
+bool CoordinatesReady = true;
 
 
 #define URL_fw_Version "https://raw.githubusercontent.com/Emcukcan/FirmwareVersioner/master/bin_version.txt"
@@ -399,10 +402,8 @@ const long mini_interval = 1000;
 void setup() {
 
   tft.init();
-  pinMode(TFT_BL, OUTPUT);
-
-
-  digitalWrite(TFT_BL, 128);
+  //  pinMode(TFT_BL, OUTPUT);
+  //  digitalWrite(TFT_BL, 128);
   tft.setRotation(1);
   tft.fillScreen(TFT_BLACK);
   Serial.begin(9600);
@@ -529,20 +530,20 @@ void LOG_CODE( void * pvParameters ) {
 
 
 void FIREBASE_CODE( void * pvParameters ) {
+  int FirebaseCounter = 0;
 
   while (WiFi.status() != WL_CONNECTED) {
     Serial.println("Firebase task is waiting for internet connection...");
     delay(500);
   }
 
-
+  esp_task_wdt_init(60, false);
   String jsonBuffer;
-
   config.api_key = API_KEY;
   auth.user.email = USER_EMAIL;
   auth.user.password = USER_PASSWORD;
   config.database_url = DATABASE_URL;
-  config.token_status_callback = tokenStatusCallback;
+  // config.token_status_callback = tokenStatusCallback;
   Firebase.begin(&config, &auth);
   Firebase.reconnectWiFi(true);
 
@@ -567,86 +568,138 @@ void FIREBASE_CODE( void * pvParameters ) {
   //will return false (error) when it called repeatedly in loop.
   config.timeout.rtdbStreamError = 3 * 1000;
 
-
-
-
-
-
-  // jsonBuffer = payload
-  //  JSONVar myObject = JSON.parse(jsonBuffer);
-  //  // JSON.typeof(jsonVar) can be used to get the type of the var
-  //  if (JSON.typeof(myObject) == "undefined") {
-  //    Serial.println("Parsing input failed!");
-  //    return;
-  //  }
-  //
-  //  Serial.print("JSON object = ");
-  //  Serial.println(myObject);
-  //  Serial.print(": ");
-  //  Serial.println(myObject["main"]["temp"]);
-  //  Serial.print("Pressure: ");
-
-
-
+  // if (Firebase.ready() && (millis() - sendDataPrevMillis > 15000 || sendDataPrevMillis == 0) && WiFi.status() == WL_CONNECTED && IPReady && CoordinatesReady)
 
 
   for (;;) {
+    esp_task_wdt_init(60, false);
 
-    if (Firebase.ready() && (millis() - sendDataPrevMillis > 15000 || sendDataPrevMillis == 0) && WiFi.status() == WL_CONNECTED)
+    if (millis() - sendDataPrevMillis > 5000 || sendDataPrevMillis == 0)
     {
+
       vTaskSuspend(UDP);
       vTaskSuspend(LOG);
       sendDataPrevMillis = millis();
-      esp_task_wdt_init(60, false);
+      Serial.println("Firebase task is running...");
+      if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("1) Internet Connection:...Checked!");
+        if (Firebase.ready()) {
+          Serial.println("2) Firebase Connection:...Checked!");
 
-      String FirebaseTimeStamp = "/Monitoring/Version1/" + SerialNumber + "/TimeStamp";
-      String FirebaseDateStamp = "/Monitoring/Version1/" + SerialNumber + "/DateStamp";
-      String FirebaseCoordinates = "/Monitoring/Version1/" + SerialNumber + "/Coordinates";
-      String FirebaseFirmwareVersion = "/Monitoring/Version1/" + SerialNumber + "/Firmware";
-      String FirebaseTerminalVoltage = "/Monitoring/Version1/" + SerialNumber + "/TerminalVoltage";
-      String FirebaseTerminalCurrent = "/Monitoring/Version1/" + SerialNumber + "/TerminalCurrent";
-      String FirebaseCellTemp = "/Monitoring/Version1/" + SerialNumber + "/CellTemp";
-      String FirebaseStateOfCharge = "/Monitoring/Version1/" + SerialNumber + "/StateOfCharge";
-      String FirebaseMaxCell = "/Monitoring/Version1/" + SerialNumber + "/MaxCell";
-      String FirebaseMinCell = "/Monitoring/Version1/" + SerialNumber + "/MinCell";
-      String FirebaseChargeEnergy = "/Monitoring/Version1/" + SerialNumber + "/ChargeEnergy";
-      String FirebaseDischargeEnergy = "/Monitoring/Version1/" + SerialNumber + "/DischargeEnergy";
-      String FirebaseRestartCounter = "/Monitoring/Version1/" + SerialNumber + "/RestartCounter";
-
-
-      Serial.printf("Set int... %s\n", Firebase.setString(fbdo, F(FirebaseTimeStamp.c_str()), TimeString) ? "ok" : fbdo.errorReason().c_str());
-      Serial.printf("Set int... %s\n", Firebase.setString(fbdo, F(FirebaseDateStamp.c_str()), DateString) ? "ok" : fbdo.errorReason().c_str());
-      Serial.printf("Set int... %s\n", Firebase.setString(fbdo, F(FirebaseCoordinates.c_str()), Coordinates) ? "ok" : fbdo.errorReason().c_str());
-      Serial.printf("Set int... %s\n", Firebase.setString(fbdo, F(FirebaseFirmwareVersion.c_str()), FirmwareVer) ? "ok" : fbdo.errorReason().c_str());
-
-      Serial.printf("Set int... %s\n", Firebase.setString(fbdo, F(FirebaseTerminalVoltage.c_str()), String(BMS.sum_voltage * 0.1)) ? "ok" : fbdo.errorReason().c_str());
-      Serial.printf("Set int... %s\n", Firebase.setString(fbdo, F(FirebaseTerminalCurrent.c_str()), String((BMS.current - 30000) * 0.1)) ? "ok" : fbdo.errorReason().c_str());
-      Serial.printf("Set int... %s\n", Firebase.setString(fbdo, F(FirebaseCellTemp.c_str()), String(BMS.max_cell_temp - 40)) ? "ok" : fbdo.errorReason().c_str());
-      Serial.printf("Set int... %s\n", Firebase.setString(fbdo, F(FirebaseStateOfCharge.c_str()), String(BMS.SOC * 0.1)) ? "ok" : fbdo.errorReason().c_str());
-      Serial.printf("Set int... %s\n", Firebase.setString(fbdo, F(FirebaseMaxCell.c_str()), String(BMS_equ.max_cell_volt_equ * 0.001)) ? "ok" : fbdo.errorReason().c_str());
-      Serial.printf("Set int... %s\n", Firebase.setString(fbdo, F(FirebaseMinCell.c_str()), String(BMS_equ.min_cell_volt_equ * 0.001)) ? "ok" : fbdo.errorReason().c_str());
-
-      Serial.printf("Set int... %s\n", Firebase.setString(fbdo, F(FirebaseChargeEnergy.c_str()), String(ChargeEnergy)) ? "ok" : fbdo.errorReason().c_str());
-      Serial.printf("Set int... %s\n", Firebase.setString(fbdo, F(FirebaseDischargeEnergy.c_str()), String(DischargeEnergy)) ? "ok" : fbdo.errorReason().c_str());
-      Serial.printf("Set int... %s\n", Firebase.setString(fbdo, F(FirebaseRestartCounter.c_str()), String(restartCounter)) ? "ok" : fbdo.errorReason().c_str());
+          String FirebaseTimeStamp = "/Monitoring/Version1/" + SerialNumber + "/TimeStamp";
+          String FirebaseDateStamp = "/Monitoring/Version1/" + SerialNumber + "/DateStamp";
+          String FirebaseCoordinates = "/Monitoring/Version1/" + SerialNumber + "/Coordinates";
+          String FirebaseFirmwareVersion = "/Monitoring/Version1/" + SerialNumber + "/Firmware";
+          String FirebaseTerminalVoltage = "/Monitoring/Version1/" + SerialNumber + "/TerminalVoltage";
+          String FirebaseTerminalCurrent = "/Monitoring/Version1/" + SerialNumber + "/TerminalCurrent";
+          String FirebaseCellTemp = "/Monitoring/Version1/" + SerialNumber + "/CellTemp";
+          String FirebaseStateOfCharge = "/Monitoring/Version1/" + SerialNumber + "/StateOfCharge";
+          String FirebaseMaxCell = "/Monitoring/Version1/" + SerialNumber + "/MaxCell";
+          String FirebaseMinCell = "/Monitoring/Version1/" + SerialNumber + "/MinCell";
+          String FirebaseChargeEnergy = "/Monitoring/Version1/" + SerialNumber + "/ChargeEnergy";
+          String FirebaseDischargeEnergy = "/Monitoring/Version1/" + SerialNumber + "/DischargeEnergy";
+          String FirebaseRestartCounter = "/Monitoring/Version1/" + SerialNumber + "/RestartCounter";
 
 
+          switch (FirebaseCounter) {
+            case 0:
+              FirebaseCounter++;
+              Serial.printf("Time Stamp... %s\n", Firebase.setString(fbdo, F(FirebaseTimeStamp.c_str()), TimeString) ? "ok" : fbdo.errorReason().c_str());
+              break;
+            case 1:
+              FirebaseCounter++;
+              Serial.printf("DateStamp... %s\n", Firebase.setString(fbdo, F(FirebaseDateStamp.c_str()), DateString) ? "ok" : fbdo.errorReason().c_str());
+              break;
+            case 2:
+              FirebaseCounter++;
+              //Serial.printf("Coordinates... %s\n", Firebase.setString(fbdo, F(FirebaseCoordinates.c_str()), Coordinates) ? "ok" : fbdo.errorReason().c_str());
+              break;
+            case 3:
+              FirebaseCounter++;
+              Serial.printf("FirmwareVersion... %s\n", Firebase.setString(fbdo, F(FirebaseFirmwareVersion.c_str()), FirmwareVer) ? "ok" : fbdo.errorReason().c_str());
+              break;
+            case 4:
+              FirebaseCounter++;
+              Serial.printf("TerminalVoltage... %s\n", Firebase.setString(fbdo, F(FirebaseTerminalVoltage.c_str()), String(BMS.sum_voltage * 0.1)) ? "ok" : fbdo.errorReason().c_str());
+              break;
+            case 5:
+              FirebaseCounter++;
+              Serial.printf("TerminalCurrent... %s\n", Firebase.setString(fbdo, F(FirebaseTerminalCurrent.c_str()), String((BMS.current - 30000) * 0.1)) ? "ok" : fbdo.errorReason().c_str());
+              break;
+            case 6:
+              FirebaseCounter++;
+              Serial.printf("CellTemp... %s\n", Firebase.setString(fbdo, F(FirebaseCellTemp.c_str()), String(BMS.max_cell_temp - 40)) ? "ok" : fbdo.errorReason().c_str());
+              break;
+            case 7:
+              FirebaseCounter++;
+              Serial.printf("StateOfCharge... %s\n", Firebase.setString(fbdo, F(FirebaseStateOfCharge.c_str()), String(BMS.SOC * 0.1)) ? "ok" : fbdo.errorReason().c_str());
+              break;
+            case 8:
+              FirebaseCounter++;
+              Serial.printf("Set int... %s\n", Firebase.setString(fbdo, F(FirebaseMaxCell.c_str()), String(BMS_equ.max_cell_volt_equ * 0.001)) ? "ok" : fbdo.errorReason().c_str());
+              break;
+            case 9:
+              FirebaseCounter++;
+              Serial.printf("MaxCell... %s\n", Firebase.setString(fbdo, F(FirebaseMaxCell.c_str()), String(BMS_equ.max_cell_volt_equ * 0.001)) ? "ok" : fbdo.errorReason().c_str());
+              break;
+            case 10:
+              FirebaseCounter++;
+              Serial.printf("MinCell... %s\n", Firebase.setString(fbdo, F(FirebaseMinCell.c_str()), String(BMS_equ.min_cell_volt_equ * 0.001)) ? "ok" : fbdo.errorReason().c_str());
+              break;
+            case 11:
+              FirebaseCounter++;
+              Serial.printf("ChargeEnergy... %s\n", Firebase.setString(fbdo, F(FirebaseChargeEnergy.c_str()), String(ChargeEnergy)) ? "ok" : fbdo.errorReason().c_str());
+              break;
+            case 12:
+              FirebaseCounter++;
+              Serial.printf("DischargeEnergy... %s\n", Firebase.setString(fbdo, F(FirebaseDischargeEnergy.c_str()), String(DischargeEnergy)) ? "ok" : fbdo.errorReason().c_str());
+              break;
+            case 13:
+              FirebaseCounter++;
+              Serial.printf("RestartCounter... %s\n", Firebase.setString(fbdo, F(FirebaseRestartCounter.c_str()), String(restartCounter)) ? "ok" : fbdo.errorReason().c_str());
+              break;
+            default:
+              FirebaseCounter = 0;
+              break;
+          }
 
-      Serial.println();
-
-      //      Serial.printf("Set bool... %s\n", Firebase.setBool(fbdo, F("/test/bool"), count % 2 == 0) ? "ok" : fbdo.errorReason().c_str());
-      //      Serial.printf("Set float... %s\n", Firebase.setFloat(fbdo, F("/test/float"), count + 10.2) ? "ok" : fbdo.errorReason().c_str());
-      //      Serial.printf("Set double... %s\n", Firebase.setDouble(fbdo, F("/test/double"), count + 35.517549723765) ? "ok" : fbdo.errorReason().c_str());
-      //      Serial.printf("Set string... %s\n", Firebase.setString(fbdo, F("/test/string"), "Hello World!") ? "ok" : fbdo.errorReason().c_str());
 
 
-      esp_task_wdt_init(60, true);
+
+
+
+
+
+
+
+          Serial.println();
+
+          //      Serial.printf("Set bool... %s\n", Firebase.setBool(fbdo, F("/test/bool"), count % 2 == 0) ? "ok" : fbdo.errorReason().c_str());
+          //      Serial.printf("Set float... %s\n", Firebase.setFloat(fbdo, F("/test/float"), count + 10.2) ? "ok" : fbdo.errorReason().c_str());
+          //      Serial.printf("Set double... %s\n", Firebase.setDouble(fbdo, F("/test/double"), count + 35.517549723765) ? "ok" : fbdo.errorReason().c_str());
+          //      Serial.printf("Set string... %s\n", Firebase.setString(fbdo, F("/test/string"), "Hello World!") ? "ok" : fbdo.errorReason().c_str());
+
+        }
+        else {
+          Serial.println("No Firebase Connection");
+        }
+      }
+      else {
+        Serial.println("No Internet Connection");
+      }
       vTaskResume(UDP);
       vTaskResume(LOG);
     }
     delay(100);
+    esp_task_wdt_init(60, true);
   }
 }
+
+
+
+
+
+
 
 
 void loop() {
@@ -1079,10 +1132,7 @@ void BMS_COMM_CODE( void * pvParameters ) {
 
 void UDP_CODE( void * pvParameters ) {
 
-  unsigned int localUdpPort = 2001;  // local port to listen on
-  char incomingPacket[255];  // buffer for incoming packets
-  char Dummy[255];
-  char  replyPacket[] = "";  // a reply string to send back
+  AsyncUDP udp;
   WiFiServer serverWifi(81);
 
   WiFiManager wifiManager;
@@ -1116,13 +1166,12 @@ void UDP_CODE( void * pvParameters ) {
   //
   //  IPAddress localGateway(192, 168, 60, 1); //hardcoded
   Serial.println((WiFi.status()));
-  Udp.begin(localUdpPort);
-  Serial.printf("Now listening at IP %s, UDP port %d\n", WiFi.localIP().toString().c_str(), localUdpPort);
+  Serial.printf("Now listening at IP %s, UDP port %d\n", WiFi.localIP().toString().c_str(), 2001);
   delay(250);
 
   SSIDName = WiFi.SSID();
   IP = WiFi.localIP().toString().c_str();
-  Port = localUdpPort;
+  Port = 2001;
   MAC = WiFi.macAddress();
   wifistatus = true;
   int len;
@@ -1130,6 +1179,7 @@ void UDP_CODE( void * pvParameters ) {
   unsigned long previousMillis = 0;
   unsigned long interval = 5000;
   unsigned long currentMillis = 0;
+
 
 
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
@@ -1141,7 +1191,7 @@ void UDP_CODE( void * pvParameters ) {
     Serial.println("Update Available");
   }
 
-  GetPublicIP();
+  //GetPublicIP();
 
 
 
@@ -1155,7 +1205,7 @@ void UDP_CODE( void * pvParameters ) {
       WiFi.reconnect();
       SSIDName = WiFi.SSID();
       IP = "No Connection";
-      Port = localUdpPort;
+      Port = 2001;
       MAC = "No Connection";
 
       previousMillis = currentMillis;
@@ -1169,153 +1219,67 @@ void UDP_CODE( void * pvParameters ) {
         }
       }
 
-
-      //UDP COMMANDS/////////////////////////////
-
-
-      int packetSize = Udp.parsePacket();
-      if (packetSize)
-      {
-        memset(incomingPacket, 0, sizeof(incomingPacket));
-        int len = Udp.read(incomingPacket, 255);
-        if (len > 0)
-        {
-          incomingPacket[len] = 0;
-        }
+      //ASYNC UDP
 
 
-        preferences.begin("my-app", false);
-        ChargeEnergyFixed = preferences.getFloat("ChargeEnergyFixed", 0);
-        DischargeEnergyFixed = preferences.getFloat("DischargeEnergyFixed", 0);
-        ChargeEnergy = preferences.getFloat("ChargeEnergy", 0);
-        DischargeEnergy = preferences.getFloat("DischargeEnergy", 0);
-        SerialNumber = preferences.getString("SerialNumber", "ENC10482000001");
+      if (udp.listen(2001)) {
+        //Serial.print("UDP Listening on IP: ");
+        // Serial.println(WiFi.localIP());
+        udp.onPacket([](AsyncUDPPacket packet) {
 
-        HCD = preferences.getFloat("HCD", 0);
-        HCC = preferences.getFloat("HCC", 0);
-        HVC = preferences.getFloat("HVC", 0);
-        LVC = preferences.getFloat("LVC", 0);
-        RC = preferences.getFloat("RC", 0);
-        RV = preferences.getFloat("RV", 0);
-        BV = preferences.getFloat("BV", 0);
-        BD = preferences.getFloat("BD", 0);
-        restartCounter = preferences.getInt("RC", 0);
-        preferences.end();
 
-        //SET SERIAL
-        int SR_INDEX_START = String(incomingPacket).indexOf("SETSR");
-        int SR_INDEX_END = String(incomingPacket).indexOf("#");
-        SerialNumber = String(incomingPacket).substring(SR_INDEX_START + 5, SR_INDEX_END);
+          //
+          //
+          //          }
 
 
 
+          Serial.print("UDP Packet Type: ");
+          Serial.print(packet.isBroadcast() ? "Broadcast" : packet.isMulticast() ? "Multicast" : "Unicast");
+          Serial.print(", From: ");
+          Serial.print(packet.remoteIP());
+          Serial.print(":");
+          Serial.print(packet.remotePort());
+          Serial.print(", To: ");
+          Serial.print(packet.localIP());
+          Serial.print(":");
+          Serial.print(packet.localPort());
+          Serial.print(", Length: ");
+          Serial.print(packet.length());
+          Serial.print(", Data: ");
+          Serial.write(packet.data(), packet.length());
+          Serial.println();
+          //reply to the client
+          packet.printf("Got %u bytes of data", packet.length());
 
-        if (SR_INDEX_START != -1 && SR_INDEX_END != -1) {
-          Udp.beginPacket(Udp.remoteIP(), Udp.remotePort());
-          Udp.print("Serialnumber:" + SerialNumber);
-          Udp.endPacket();
-          for (int i = 0; i < 10; i++) {
-            incomingPacket[i] = 's';
+          String UDPRequest = String( (char*) packet.data());
+
+          Serial.println(UDPRequest);
+
+
+
+          //PINGING BMS
+          int PING_INDEX_START = UDPRequest.indexOf("PING");
+          int PING_INDEX_END = UDPRequest.indexOf("#");
+          if (PING_INDEX_START != -1 && PING_INDEX_END != -1) {
+            packet.printf("PONG_BMS", packet.length());
           }
-        }
 
 
 
 
 
 
-        //PINGING BMS
-        int SLAVE_INDEX_START = String(incomingPacket).indexOf("PING");
-        int SLAVE_INDEX_END = String(incomingPacket).indexOf("#");
-        if (SLAVE_INDEX_START != -1 && SLAVE_INDEX_END != -1) {
-          Udp.beginPacket(Udp.remoteIP(), Udp.remotePort());
-          Udp.print("PONG_BMS");
-          Udp.endPacket();
-          for (int i = 0; i < 10; i++) {
-            incomingPacket[i] = 's';
-          }
-        }
-
-        //MEASUREMENT BMS
-        SLAVE_INDEX_START = String(incomingPacket).indexOf("GET_MEAS");
-        SLAVE_INDEX_END = String(incomingPacket).indexOf("#");
-        if (SLAVE_INDEX_START != -1 && SLAVE_INDEX_END != -1) {
-          Udp.beginPacket(Udp.remoteIP(), Udp.remotePort());
 
 
-          String MEAS = "TV" + String(BMS.sum_voltage) +  "/TC" + String(BMS.current) + "/SOC" +  String(BMS.SOC) + "/TEMP" +  String(BMS.max_cell_temp) +
-                        "/MAX" + String(BMS_equ.max_cell_volt_equ) + "/MIN" + String(BMS_equ.min_cell_volt_equ) +  "/STT" + String(BMS.state) +
-                        "/CH" + String(BMS.charge) + "/DSH" + String(BMS.discharge) + "/LF" + String(BMS.bms_life) +
-                        "/RC" + String(BMS.rem_cap) + "/BL" + String(balancerState) + "/#";
 
 
-          Udp.print(MEAS);
-          Udp.endPacket();
-          for (int i = 0; i < 10; i++) {
-            incomingPacket[i] = 's';
-          }
-        }
 
 
-        //CELLS BMS
-        SLAVE_INDEX_START = String(incomingPacket).indexOf("GET_CELLS");
-        SLAVE_INDEX_END = String(incomingPacket).indexOf("#");
-        if (SLAVE_INDEX_START != -1 && SLAVE_INDEX_END != -1) {
-
-          String CellString = "";
-
-          Serial.println(BMS_equ.cell_voltage_equ[0]);
-
-
-          for (int i = 0; i < 16; i++) {
-            CellString = CellString + String(BMS_equ.cell_voltage_equ[i]) + "/";
-          }
-          CellString = "CELLS" + CellString + "#";
-
-          Udp.beginPacket(Udp.remoteIP(), Udp.remotePort());
-          Udp.print(CellString);
-          Udp.endPacket();
-          for (int i = 0; i < 10; i++) {
-            incomingPacket[i] = 's';
-          }
-        }
-
-        //ALARMS BMS
-        SLAVE_INDEX_START = String(incomingPacket).indexOf("GET_ALARMS");
-        SLAVE_INDEX_END = String(incomingPacket).indexOf("#");
-        if (SLAVE_INDEX_START != -1 && SLAVE_INDEX_END != -1) {
-
-          String AlarmsString = "";
-          for (int i = 0; i < 28; i++) {
-            AlarmsString = AlarmsString + String(BMS.error[i]) + "/";
-          }
-          AlarmsString = "ALARMS" + AlarmsString + "#";
-
-          Udp.beginPacket(Udp.remoteIP(), Udp.remotePort());
-          Udp.print(AlarmsString);
-          Udp.endPacket();
-          for (int i = 0; i < 10; i++) {
-            incomingPacket[i] = 's';
-          }
-        }
-
-        //ENERGY BMS
-        SLAVE_INDEX_START = String(incomingPacket).indexOf("GET_ENERGY");
-        SLAVE_INDEX_END = String(incomingPacket).indexOf("#");
-        if (SLAVE_INDEX_START != -1 && SLAVE_INDEX_END != -1) {
-
-          String EnergyString = "";
-          EnergyString = "CH" + String(ChargeEnergy) + "/DS" + String(DischargeEnergy) + "/#";
-          Udp.beginPacket(Udp.remoteIP(), Udp.remotePort());
-          Udp.print(EnergyString);
-          Udp.endPacket();
-          for (int i = 0; i < 10; i++) {
-            incomingPacket[i] = 's';
-          }
-        }
-
-        delay(10);
+        });
       }
+
+
       wifistatus = (WiFi.status() == WL_CONNECTED);
       delay(100);
     }
@@ -1383,6 +1347,18 @@ void TOUCH_SCREEN_CODE( void * pvParameters ) {
         numpadEnable = false;
         notificationEnable = false;
       }
+
+
+      ///Update Firmware
+      if (y >= 66 && y <= 82 && x >= 385 && x <= 400 && !action_done && updateReady ) {
+        Serial.println("Firmware update activated");
+        action_done = true;
+      }
+
+
+
+
+
 
       //MainMenuPushButtons/////////////////////////////////////////////////////////////////
       if (PageNumber == 0) {
@@ -2106,9 +2082,9 @@ void drawBanner(String Time, String Date, String Page, bool wifistatus, int noti
 
   //FirmwareVersion+RESTART+SERIAL
   Banner.setTextFont(GLCD);
-  Banner.drawString("Ver:" + FirmwareVer, 430, 5);
-  Banner.drawString("R:" + String(restartCounter), 430, 18);
-  Banner.drawString("SR:" + SerialNumber, 430, 32);
+  Banner.drawString("Ver:" + FirmwareVer, 400, 5);
+  Banner.drawString("R:" + String(restartCounter), 400, 18);
+  Banner.drawString("SR:" + SerialNumber, 400, 32);
   Banner.setFreeFont(&Orbitron_Light_32);
 
 
@@ -2133,7 +2109,7 @@ void drawBanner(String Time, String Date, String Page, bool wifistatus, int noti
     UpdateIcon.createSprite(16, 16);
     UpdateIcon.setSwapBytes(true);
     UpdateIcon.pushImage(0, 0, 16, 16, updateReady);
-    UpdateIcon.pushToSprite(&Banner, 390, 66, TFT_BLACK);
+    UpdateIcon.pushToSprite(&Banner, 385, 66, TFT_BLACK);
   }
 
   Banner.pushSprite(0, 0);
@@ -2836,7 +2812,7 @@ void drawLandingPage() {
   LandingIconFrame.setFreeFont(&Orbitron_Light_32);
 
 
-  LandingFrame.createSprite(200, 150);
+  LandingFrame.createSprite(200, 190);
   LandingFrame.fillSprite(TFT_BLACK);
   LandingFrame.setFreeFont(&Orbitron_Light_32);
   LandingFrame.setTextColor(TFT_WHITE);
@@ -2862,6 +2838,11 @@ void drawLandingPage() {
     LandingFrame.setTextColor(TOLGA_YELLOW);
     LandingFrame.drawString(String(i) + "%", 70, 95);
 
+    if (updateReady) {
+      LandingFrame.drawString("New firmware update", 30, 135, 2);
+      LandingFrame.drawString( "is ready", 65, 150, 2);
+    }
+
 
     if (i == 99) {
 
@@ -2869,7 +2850,7 @@ void drawLandingPage() {
     else {
       LandingIconFrame.pushRotated(i * 3);
       EncapIcon.pushToSprite(&LandingFrame, 0, 0, TFT_BLACK);
-      LandingFrame.pushSprite(250, 150);
+      LandingFrame.pushSprite(250, 100);
       delay(10);
 
     }
@@ -4074,25 +4055,34 @@ String GetPublicIP() {
 
   //GET PUBLIC IP
   HTTPClient http;
-  http.begin("https://api.ipify.org/?format=json"); //Specify the URL
-  int httpCode = http.GET();                        //Make the request
+  http.setTimeout(1);
 
-  if (httpCode > 0) { //Check for the returning code
+  for (int trial = 0; trial < 5; trial++) {
 
-    payload = http.getString();
-    JSONVar myObject = JSON.parse(payload);
-    PublicIP = myObject["ip"];
-    GetCoordinates(PublicIP);
+    http.begin("https://api.ipify.org/?format=json"); //Specify the URL
+    http.setTimeout(1);
 
+    int httpCode = http.GET();                        //Make the request
 
+    if (httpCode > 0) { //Check for the returning code
+      IPReady = true;
+      payload = http.getString();
+      JSONVar myObject = JSON.parse(payload);
+      PublicIP = myObject["ip"];
+      GetCoordinates(PublicIP);
+      break;
+    }
+    else {
+      Serial.println("Error on HTTP request get public ip");
+    }
 
+    http.end();
 
   }
-  else {
-    Serial.println("Error on HTTP request");
-  }
 
-  http.end();
+
+
+
   return payload;
 }
 
@@ -4101,25 +4091,32 @@ String GetPublicIP() {
 String GetCoordinates(String IP) {
   String payload;
 
-  //GET PUBLIC IP
+  //GET coordinates
   HTTPClient http;
+  http.setTimeout(1);
 
   String URL = "https://ipapi.co/" + PublicIP + "/latlong";
 
-  http.begin(URL.c_str()); //Specify the URL
-  int httpCode = http.GET();                        //Make the request
 
-  if (httpCode > 0) { //Check for the returning code
-    payload = http.getString();
-    Coordinates = payload;
+  for (int trial = 0; trial < 5; trial++) {
 
+    http.begin(URL.c_str()); //Specify the URL
+    http.setTimeout(1);
 
+    int httpCode = http.GET();                        //Make the request
+
+    if (httpCode > 0) { //Check for the returning code
+      payload = http.getString();
+      Coordinates = payload;
+      CoordinatesReady = true;
+      break;
+    }
+    else {
+      Serial.println("Error on HTTP request geocode");
+    }
+
+    http.end();
 
   }
-  else {
-    Serial.println("Error on HTTP request");
-  }
-
-  http.end();
   return payload;
 }
