@@ -1,6 +1,5 @@
 //2-8-2023
 
-
 #include "BluetoothSerial.h"
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -86,16 +85,17 @@ unsigned long count = 0;
 #include "AsyncUDP.h"
 
 
-char VALUE [512] = {'\0'};  // 511 chars and the end terminator if needed make larger/smaller
-String Output;  //Read output
-float VoltageArraySPIFF[300];
-float CurrentArraySPIFF[300];
-float TempArraySPIFF[300];
+//char VALUE [512] = {'\0'};  // 511 chars and the end terminator if needed make larger/smaller
+//String Output;  //Read output
+//float VoltageArraySPIFF[300];
+//float CurrentArraySPIFF[300];
+//float TempArraySPIFF[300];
 String SerialNumber;
 String WifiDirect;
 boolean firebaseReady = false;
 
 double dailyCells[16];
+float AllCells[16];
 
 String fileName;
 int fileindex;
@@ -107,6 +107,7 @@ String FolderName;
 int MinuteIndex;
 String PublicIP;
 String Coordinates;
+String UDPprocessor = "";
 ////////////////////
 
 #include <Wire.h>
@@ -115,6 +116,7 @@ Adafruit_FT6206 ts = Adafruit_FT6206();
 #include <Preferences.h>
 
 Preferences preferences;
+WiFiManager wifiManager;
 
 TFT_eSPI    tft = TFT_eSPI();
 TFT_eSprite PageFrame = TFT_eSprite(&tft);
@@ -307,6 +309,7 @@ bool ReadAllParameters = false;
 bool CHARGE_SET = false;
 bool DISCHARGE_SET = false;
 bool BALANCE_SET = false;
+bool updateIcon = false;
 
 
 bool notificationStatus = false;
@@ -338,7 +341,7 @@ bool EQUOFF2 = false;
 //GITHUB UPDATE
 
 String FirmwareVer = {
-  "2.9"
+  "3.3"
 };
 
 
@@ -347,8 +350,9 @@ bool IPReady = true;
 bool CoordinatesReady = true;
 
 
-#define URL_fw_Version "https://raw.githubusercontent.com/Emcukcan/FirmwareVersioner/master/bin_version.txt"
-#define URL_fw_Bin "https://raw.githubusercontent.com/Emcukcan/FirmwareVersioner/master/fw.bin"
+#define URL_fw_Version  "https://raw.githubusercontent.com/Emcukcan/FirmwareVersioner/master/bin_version.txt"
+#define URL_fw_Bin  "https://raw.githubusercontent.com/Emcukcan/FirmwareVersioner/master/fw.bin"
+
 
 
 
@@ -402,7 +406,7 @@ void setup() {
   preferences.putInt("RC", restartCounter);
   preferences.end();
 
-
+  // SerialNumber = preferences.getString("SerialNumber", "ENC10482000001");
 
 
 
@@ -462,6 +466,9 @@ void setup() {
     &BT,      /* Task handle to keep track of created task */
     1);          /* pin task to core 0 */
   delay(50);
+
+
+  drawLandingPage();
 
 }
 
@@ -828,17 +835,12 @@ void UDPTEST_CODE( void * pvParameters ) {
   MAC = WiFi.macAddress();
   wifistatus = true;
 
-  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-  printLocalTime();
 
-  if (FirmwareVersionCheck()) {
-    //firmwareUpdate();
-    UpdateAvailable = true;
-    Serial.println("Update Available");
-  }
+
+
+
 
   for (;;) {
-    delay(1000);
 
     currentMillis = millis();
     // if WiFi is down, try reconnecting
@@ -868,6 +870,98 @@ void UDPTEST_CODE( void * pvParameters ) {
           if (PING_INDEX_START != -1 && PING_INDEX_END != -1) {
             packet.printf("PONG_BMS", packet.length());
           }///////////////////////////////////////////////
+
+          //SET SERIAL BMS////////////////////////////////
+          //EN-02-048V0-0-3-3-0-0-23-A-00001
+          int SERIAL_INDEX_START = UDPRequest.indexOf("SETSR");
+          int SERIAL_INDEX_END = UDPRequest.indexOf("#");
+          if (SERIAL_INDEX_START != -1 && SERIAL_INDEX_END != -1) {
+            UDPprocessor = UDPRequest.substring(SERIAL_INDEX_START + 2, SERIAL_INDEX_END);
+            SerialNumber = "EN" + UDPprocessor;
+            packet.printf(SerialNumber.c_str(), packet.length());
+            preferences.begin("my-app", false);
+            preferences.putString("SerialNumber", SerialNumber);
+            preferences.end();
+          }///////////////////////////////////////////////
+
+          //GET SERIAL BMS////////////////////////////////
+          //EN-02-048V0-0-3-3-0-0-23-A-00001
+          int GSERIAL_INDEX_START = UDPRequest.indexOf("GETSR");
+          int GSERIAL_INDEX_END = UDPRequest.indexOf("#");
+          if (GSERIAL_INDEX_START != -1 && GSERIAL_INDEX_END != -1) {
+            packet.printf(SerialNumber.c_str(), packet.length());
+          }///////////////////////////////////////////////
+
+          //GET FIRMWARE BMS////////////////////////////////
+          int GFIRM_INDEX_START = UDPRequest.indexOf("GETFW");
+          int GFIRM_INDEX_END = UDPRequest.indexOf("#");
+          if (GFIRM_INDEX_START != -1 && GFIRM_INDEX_END != -1) {
+            packet.printf(FirmwareVer.c_str(), packet.length());
+          }///////////////////////////////////////////////
+
+          //GET MEAS BMS////////////////////////////////
+          int GMEAS_INDEX_START = UDPRequest.indexOf("GET_MEAS");
+          int GMEAS_INDEX_END = UDPRequest.indexOf("#");
+          if (GMEAS_INDEX_START != -1 && GMEAS_INDEX_END != -1) {
+
+            String MEAS = "TV" + String(BMS.sum_voltage * 0.1) +  "/TC" + String((BMS.current - 30000) * 0.1) + "/SOC" +  String(BMS.SOC * 0.1) + "/TEMP" +  String(BMS.max_cell_temp - 40) +
+                          "/MAX" + String(BMS_equ.max_cell_volt_equ * 0.001) + "/MIN" + String(BMS_equ.min_cell_volt_equ * 0.001) +  "/STT" + String(BMS.state) +
+                          "/CH" + String(BMS.charge) + "/DSH" + String(BMS.discharge) + "/LF" + String(BMS.bms_life) +
+                          "/RC" + String(BMS.rem_cap) + "/BL" + String(balancerState) + "/#";
+
+            packet.printf(MEAS.c_str(), packet.length());
+          }///////////////////////////////////////////////
+
+
+          //GET CELLS BMS////////////////////////////////
+          int GCELLS_INDEX_START = UDPRequest.indexOf("GET_CELLS");
+          int GCELLS_INDEX_END = UDPRequest.indexOf("#");
+          if (GCELLS_INDEX_START != -1 && GCELLS_INDEX_END != -1) {
+
+            String CellString = "";
+            for (int i = 0; i < 16; i++) {
+              CellString = CellString + String(BMS_equ.cell_voltage_equ[i] * 0.001) + "/";
+            }
+            CellString = "CELLS" + CellString + "#";
+            packet.printf(CellString.c_str(), packet.length());
+          }///////////////////////////////////////////////
+
+
+          //GET ALARMS BMS////////////////////////////////
+          int GALARMS_INDEX_START = UDPRequest.indexOf("GET_ALARMS");
+          int GALARMS_INDEX_END = UDPRequest.indexOf("#");
+          if (GALARMS_INDEX_START != -1 && GALARMS_INDEX_END != -1) {
+
+            String AlarmsString = "";
+            for (int i = 0; i < 28; i++) {
+              AlarmsString = AlarmsString + String(BMS.error[i]) + "/";
+            }
+            AlarmsString = "ALARMS" + AlarmsString + "#";
+            packet.printf(AlarmsString.c_str(), packet.length());
+          }///////////////////////////////////////////////
+
+
+          //GET LIMITS BMS////////////////////////////////
+          int GLIMITS_INDEX_START = UDPRequest.indexOf("GET_LIMITS");
+          int GLIMITS_INDEX_END = UDPRequest.indexOf("#");
+          if (GLIMITS_INDEX_START != -1 && GLIMITS_INDEX_END != -1) {
+            ReadAllParameters = true;
+
+            String LIMITS = "DSCHI" + String(BMS.dischar_curr2) + "/" + "CHCHI" + String(BMS.charge_curr2) + "/" + "SUMVHI" + String(BMS.sumv_high2 * 0.1) + "/" +
+                            "SUMVLO" + String(BMS.sumv_low2 * 0.1) + "/" + "CVHI" + String(BMS.cell_volthigh2 * 0.001) + "/" + "CVLO" + String(BMS.cell_voltlow2 * 0.001) + "/" +
+                            "BV" + String(BMS.balance_volt * 0.001) + "/" + "BDV" + String(BMS.balance_volt_diff) + "/" + "CTHI" + String(BMS.charge_temp_high2) + "/" +
+                            "CTLO" + String(BMS.charge_temp_low2) + "/" + "DTHI" + String(BMS.discharge_temp_high2) + "/" + "DTLO" + String(BMS.discharge_temp_low2) + "/" +
+                            "VDF" + String(BMS.volt_diff2) + "/";
+
+            LIMITS = "LIMITS" + LIMITS + "#";
+            packet.printf(LIMITS.c_str(), packet.length());
+          }///////////////////////////////////////////////
+
+
+
+
+
+
         });
       }
       delay(100);
@@ -885,6 +979,25 @@ void FIREBASE_CODE( void * pvParameters ) {
     delay(500);
   }
   esp_task_wdt_init(60, false);
+
+
+
+  //CHECK FOR UPDATE
+  for (int i = 0; i < 3; i++) {
+    if (FirmwareVersionCheck()) {
+      firmwareUpdate();
+      UpdateAvailable = true;
+      updateIcon = true;
+      Serial.println("Update Available");
+      break;
+    }
+  }
+
+  //CHECK FOR RTC
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+  printLocalTime();
+
+
   String jsonBuffer;
   config.api_key = API_KEY;
   auth.user.email = USER_EMAIL;
@@ -929,19 +1042,21 @@ void FIREBASE_CODE( void * pvParameters ) {
         if (Firebase.ready()) {
           Serial.println("2) Firebase Connection:...Checked!");
 
-          String FirebaseTimeStamp = "/Monitoring/Version1/" + SerialNumber + "/TimeStamp";
-          String FirebaseDateStamp = "/Monitoring/Version1/" + SerialNumber + "/DateStamp";
-          String FirebaseCoordinates = "/Monitoring/Version1/" + SerialNumber + "/Coordinates";
-          String FirebaseFirmwareVersion = "/Monitoring/Version1/" + SerialNumber + "/Firmware";
-          String FirebaseTerminalVoltage = "/Monitoring/Version1/" + SerialNumber + "/TerminalVoltage";
-          String FirebaseTerminalCurrent = "/Monitoring/Version1/" + SerialNumber + "/TerminalCurrent";
-          String FirebaseCellTemp = "/Monitoring/Version1/" + SerialNumber + "/CellTemp";
-          String FirebaseStateOfCharge = "/Monitoring/Version1/" + SerialNumber + "/StateOfCharge";
-          String FirebaseMaxCell = "/Monitoring/Version1/" + SerialNumber + "/MaxCell";
-          String FirebaseMinCell = "/Monitoring/Version1/" + SerialNumber + "/MinCell";
-          String FirebaseChargeEnergy = "/Monitoring/Version1/" + SerialNumber + "/ChargeEnergy";
-          String FirebaseDischargeEnergy = "/Monitoring/Version1/" + SerialNumber + "/DischargeEnergy";
-          String FirebaseRestartCounter = "/Monitoring/Version1/" + SerialNumber + "/RestartCounter";
+
+          timeDayS + "/" + timeMonthS + "/" + timeYearS;
+
+          String FirebaseTimeStamp = "/Monitoring/Version1/" + SerialNumber + "/" + timeYearS + "/" + timeMonthS + "/" + timeDayS + "/" + timeHourS + "/TimeStamp";
+          String FirebaseCoordinates = "/Monitoring/Version1/" + SerialNumber + "/" + timeYearS + "/" + timeMonthS + "/" + timeDayS + "/" + timeHourS + "/Coordinates";
+          String FirebaseFirmwareVersion = "/Monitoring/Version1/" + SerialNumber + "/" + timeYearS + "/" + timeMonthS + "/" + timeDayS + "/" + timeHourS + "/Firmware";
+          String FirebaseTerminalVoltage = "/Monitoring/Version1/" + SerialNumber + "/" + timeYearS + "/" + timeMonthS + "/" + timeDayS + "/" + timeHourS + "/TerminalVoltage";
+          String FirebaseTerminalCurrent = "/Monitoring/Version1/" + SerialNumber + "/" + timeYearS + "/" + timeMonthS + "/" + timeDayS + "/" + timeHourS + "/TerminalCurrent";
+          String FirebaseCellTemp = "/Monitoring/Version1/" + SerialNumber + "/" + timeYearS + "/" + timeMonthS + "/" + timeDayS + "/" + timeHourS + "/CellTemp";
+          String FirebaseStateOfCharge = "/Monitoring/Version1/" + SerialNumber + "/" + timeYearS + "/" + timeMonthS + "/" + timeDayS + "/" + timeHourS + "/StateOfCharge";
+          String FirebaseMaxCell = "/Monitoring/Version1/" + SerialNumber + "/" + timeYearS + "/" + timeMonthS + "/" + timeDayS + "/" + timeHourS + "/MaxCell";
+          String FirebaseMinCell = "/Monitoring/Version1/" + SerialNumber + "/" + timeYearS + "/" + timeMonthS + "/" + timeDayS + "/" + timeHourS + "/MinCell";
+          String FirebaseChargeEnergy = "/Monitoring/Version1/" + SerialNumber + "/" + timeYearS + "/" + timeMonthS + "/" + timeDayS + "/" + timeHourS + "/ChargeEnergy";
+          String FirebaseDischargeEnergy = "/Monitoring/Version1/" + SerialNumber + "/" + timeYearS + "/" + timeMonthS + "/" + timeDayS + "/" + timeHourS + "/DischargeEnergy";
+          String FirebaseRestartCounter = "/Monitoring/Version1/" + SerialNumber + "/" + timeYearS + "/" + timeMonthS + "/" + timeDayS + "/" + timeHourS + "/RestartCounter";
 
 
           switch (FirebaseCounter) {
@@ -951,7 +1066,7 @@ void FIREBASE_CODE( void * pvParameters ) {
               break;
             case 1:
               FirebaseCounter++;
-              Serial.printf("DateStamp... %s\n", Firebase.setString(fbdo, F(FirebaseDateStamp.c_str()), DateString) ? "ok" : fbdo.errorReason().c_str());
+              //Serial.printf("DateStamp... %s\n", Firebase.setString(fbdo, F(FirebaseDateStamp.c_str()), DateString) ? "ok" : fbdo.errorReason().c_str());
               break;
             case 2:
               FirebaseCounter++;
@@ -1001,6 +1116,15 @@ void FIREBASE_CODE( void * pvParameters ) {
               FirebaseCounter++;
               Serial.printf("RestartCounter... %s\n", Firebase.setString(fbdo, F(FirebaseRestartCounter.c_str()), String(restartCounter)) ? "ok" : fbdo.errorReason().c_str());
               break;
+            case 14:
+              FirebaseCounter++;
+              if (FirmwareVersionCheck()) {
+                UpdateAvailable = true;
+                updateIcon = true;
+                Serial.println("Update Available");
+              }
+              break;
+
             default:
               FirebaseCounter = 0;
               break;
@@ -1297,6 +1421,27 @@ void TOUCH_SCREEN_CODE( void * pvParameters ) {
           Serial.println("SETTED SOC");
           action_done = true;
           SOC_CAL = true;
+        }
+
+
+        if (!action_done && y >= 205 && y <= 275 && x >= 175 && x <= 305 && numpadEnable == false) { //open numpad for SOC
+          Serial.println("ResetController");
+          action_done = true;
+          ESP.restart();
+        }
+
+        if (!action_done && y >= 205 && y <= 275 && x >= 30 && x <= 160 && numpadEnable == false) { //open numpad for SOC
+          Serial.println("updateFirmware");
+          action_done = true;
+
+        }
+
+        if (!action_done && y >= 205 && y <= 275 && x >= 320 && x <= 450 && numpadEnable == false) { //open numpad for SOC
+          Serial.println("resetNettwork");
+          wifiManager.resetSettings();
+          Serial.println("forget password");
+          delay(1000);
+          action_done = true;
         }
       }
 
@@ -1750,7 +1895,7 @@ void loop() {
         break;
 
       case 12:
-        drawBanner(TimeString, DateString, "Calibration", wifistatus, alarmNo, UpdateAvailable); //Balance alarms
+        drawBanner(TimeString, DateString, "Configuration", wifistatus, alarmNo, UpdateAvailable); //Balance alarms
         drawSOCCalibrate(numpadEnable, notificationEnable);
         break;
 
@@ -2103,7 +2248,7 @@ void drawMainMenu() {
   Icon9.pushToSprite(&PageFrame, 390, 15, TFT_BLACK);
   PageFrame.setTextDatum(BC_DATUM);
   PageFrame.setFreeFont(&Orbitron_Light_32);
-  PageFrame.drawString("Calib.", 420, 105);
+  PageFrame.drawString("Conf.", 420, 105);
   PageFrame.setTextDatum(TL_DATUM);
 
   Icon10.createSprite(48, 48);
@@ -2589,6 +2734,26 @@ void drawSOCCalibrate(bool numpad, bool Notification) {
       PageFrame.fillRoundRect(380, 18, 70, 60, 5, TFT_RED);
       PageFrame.setTextColor(TFT_WHITE);
       PageFrame.drawString("SET", 389, 30);
+
+
+      PageFrame.setTextDatum(MC_DATUM);
+      PageFrame.fillRoundRect(30, 110, 130, 70, 5, TFT_RED);
+      PageFrame.setTextColor(TFT_WHITE);
+      PageFrame.drawString("Update", 95, 122);
+      PageFrame.drawString("Firm.", 95, 152);
+
+      PageFrame.setTextDatum(MC_DATUM);
+      PageFrame.fillRoundRect(175, 110, 130, 70, 5, TFT_RED);
+      PageFrame.setTextColor(TFT_WHITE);
+      PageFrame.drawString("Reset", 240, 122);
+      PageFrame.drawString("Controll.", 240, 152);
+
+      PageFrame.setTextDatum(MC_DATUM);
+      PageFrame.fillRoundRect(320, 110, 130, 70, 5, TFT_RED);
+      PageFrame.setTextColor(TFT_WHITE);
+      PageFrame.drawString("Reset", 385, 122);
+      PageFrame.drawString("Network", 385, 152);
+
 
       PageFrame.pushSprite(0, 95);
       PageFrame.deleteSprite();
@@ -3233,7 +3398,7 @@ void drawLandingPage() {
     PageFrame.setTextColor(TOLGA_YELLOW);
     PageFrame.drawString(String(i) + "%", 70, 95);
 
-    if (updateReady) {
+    if (updateIcon) {
       PageFrame.drawString("New firmware update", 30, 135, 2);
       PageFrame.drawString( "is ready", 65, 150, 2);
     }
@@ -3251,6 +3416,19 @@ void drawLandingPage() {
     }
   }
   PageFrame.deleteSprite();
+  Icon1.deleteSprite();
+  Icon2.deleteSprite();
+  Icon3.deleteSprite();
+  Icon4.deleteSprite();
+  Icon5.deleteSprite();
+  Icon6.deleteSprite();
+  Icon7.deleteSprite();
+  Icon8.deleteSprite();
+  Icon9.deleteSprite();
+  Icon10.deleteSprite();
+  Icon11.deleteSprite();
+  Icon12.deleteSprite();
+  Icon13.deleteSprite();
 }
 
 
@@ -3579,12 +3757,15 @@ int ringMeter(int value, int vmin, int vmax, int x, int y, int r, const char *un
 
 void drawCell() {
 
+
+  for (int i = 0; i < 16; i++) {
+    AllCells[i] = BMS_equ.cell_voltage_equ[i] * 0.001;
+  }
+
   PageFrame.createSprite(480, 225);
 
   for (int t = 0; t < 8; t++) {
-    float cellvolt = BMS_equ.cell_voltage_equ[t] * 0.001;
-    drawCellMainUp(50 + 57 * t, 40 , cellvolt, (t) + 1, cellvolt == 2.50);
-
+    drawCellMainUp(50 + 57 * t, 40 , t);
   }
 
 
@@ -3593,12 +3774,12 @@ void drawCell() {
 }
 
 
-void drawCellMainUp(int startXcoor, int startYcoor, float Voltage, int CellNumber, double Alarm) {
+void drawCellMainUp(int startXcoor, int startYcoor, int CellNumber) {
   PageFrame.setTextDatum(MC_DATUM);
 
-  float envelope = random(0, 14) * 0.1;
-  float anode = random(27, 37) * 0.1;
-  float cathode = random(27, 37) * 0.1;
+  float envelope = random(0, 10) * 0.1;
+  float anode = AllCells[CellNumber];
+  float cathode = AllCells[CellNumber + 1];
 
   PageFrame.fillRoundRect(startXcoor , startYcoor , 10, 120, 2, TFT_DARKGREY);
   // CellFrame.fillRoundRect(startXcoor , startYcoor , 10, 50, 2, TOLGA_GREEN);
@@ -3631,10 +3812,10 @@ void drawCellMainUp(int startXcoor, int startYcoor, float Voltage, int CellNumbe
   PageFrame.drawString(String(cathode), startXcoor - 20, startYcoor + 108);
 
   PageFrame.setTextColor(TOLGA_BLUE_2);
-  PageFrame.drawString("Cell#" + String(CellNumber), startXcoor , startYcoor + 140);
+  PageFrame.drawString("Cell#" + String(CellNumber + 1), startXcoor , startYcoor + 140);
 
   PageFrame.setTextColor(TFT_WHITE);
-  PageFrame.drawString(String(anode + cathode), startXcoor , startYcoor + 153);
+  PageFrame.drawString(String(anode + cathode) + "V", startXcoor , startYcoor + 153);
 
 }
 
@@ -3659,6 +3840,15 @@ void drawUpload() {
 //OPERATIONAL FUNCTIONS/////////////////////////////
 
 void firmwareUpdate(void) {
+
+
+  preferences.begin("my-app", false);
+  restartCounter = 0;
+  preferences.putInt("RC", restartCounter);
+  preferences.end();
+
+  delay(100);
+
   updateStarted = true;
   PageNumber = 15;
   rtc_wdt_protect_off();
