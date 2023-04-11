@@ -520,7 +520,7 @@ bool EQUOFF2 = false;
 //GITHUB UPDATE
 
 String FirmwareVer = {
-  "5.4.5"
+  "5.4.6"
 };
 
 
@@ -750,7 +750,7 @@ void setup() {
   xTaskCreatePinnedToCore(
     TOUCH_SCREEN_CODE,   /* Task function. */
     "TOUCH_SCREEN",     /* name of task. */
-    3000,       /* Stack size of task */
+    4000,       /* Stack size of task */
     NULL,        /* parameter of the task */
     96,           /* priority of the task */
     &TOUCH_SCREEN,      /* Task handle to keep track of created task */
