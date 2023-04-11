@@ -520,7 +520,7 @@ bool EQUOFF2 = false;
 //GITHUB UPDATE
 
 String FirmwareVer = {
-  "5.4.6"
+  "5.4.7"
 };
 
 
